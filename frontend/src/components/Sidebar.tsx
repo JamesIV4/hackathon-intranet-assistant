@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { get, set, del, keys } from "idb-keyval";
+import { useState, useEffect } from "react";
+import { del, keys } from "idb-keyval";
 
 export default function Sidebar({
   onSelect,
@@ -8,11 +8,9 @@ export default function Sidebar({
   onSelect: (id: string | null) => void;
 }) {
   const [convs, setConvs] = useState<string[]>([]);
-
   useEffect(() => {
     keys().then((ids) => setConvs(ids.map(String)));
   }, []);
-
   return (
     <aside className="w-64 bg-zinc-900 p-4 flex flex-col gap-2 border-r border-zinc-700">
       <button onClick={() => onSelect(null)} className="btn-primary">
@@ -29,7 +27,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={() =>
-                del(id).then(() => setConvs((cv) => cv.filter((c) => c !== id)))
+                del(id).then(() => setConvs((cs) => cs.filter((c) => c !== id)))
               }
               className="opacity-0 group-hover:opacity-100"
             >

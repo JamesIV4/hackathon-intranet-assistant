@@ -7,3 +7,4 @@ models/
 .venv/
 .npmrc
 __pycache__
+secure.env

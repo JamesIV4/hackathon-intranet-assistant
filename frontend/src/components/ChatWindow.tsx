@@ -11,27 +11,63 @@ export default function ChatWindow({ convId }: { convId: string | null }) {
 
   // load history
   useEffect(() => {
-    if (convId) get(convId).then((h) => h && setMessages(h));
-    else setMessages([]);
+    if (convId) {
+      get(convId).then((h) => h && setMessages(h));
+    } else {
+      setMessages([]);
+    }
   }, [convId]);
 
-  // open ws once
+  // open WS with debug logs
   useEffect(() => {
-    wsRef.current = new WebSocket("ws://localhost:8000/ws");
-    return () => wsRef.current?.close();
+    const host = window.location.hostname;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${host}:8000/ws`);
+
+    socket.onopen = () => console.log("[WS] open");
+    socket.onmessage = (e) => {
+      console.log("[WS] message", e.data);
+      setMessages((m) => [...m, { role: "bot", content: e.data }]);
+    };
+    socket.onclose = (e) => console.log("[WS] closed", e);
+    socket.onerror = (e) => console.error("[WS] error", e);
+
+    wsRef.current = socket;
+    return () => {
+      console.log("[WS] closing");
+      socket.close();
+    };
   }, []);
 
   const send = (text: string) => {
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    wsRef.current?.send(text);
+    console.log("[send] readyState", wsRef.current?.readyState);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log("[send] sending", text);
+      setMessages((m) => [...m, { role: "user", content: text }]);
+      wsRef.current.send(text);
+    } else {
+      console.warn("[send] WS not open, reconnecting...");
+      const host = window.location.hostname;
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const socket = new WebSocket(`${protocol}://${host}:8000/ws`);
+
+      socket.onopen = () => {
+        console.log("[reconnect] open, sending", text);
+        setMessages((m) => [...m, { role: "user", content: text }]);
+        socket.send(text);
+      };
+      socket.onmessage = (e) => {
+        console.log("[reconnect] message", e.data);
+        setMessages((m) => [...m, { role: "bot", content: e.data }]);
+      };
+      socket.onclose = (e) => console.log("[reconnect] closed", e);
+      socket.onerror = (e) => console.error("[reconnect] error", e);
+
+      wsRef.current = socket;
+    }
   };
 
-  useEffect(() => {
-    wsRef.current!.onmessage = (e) =>
-      setMessages((m) => [...m, { role: "bot", content: e.data }]);
-  }, []);
-
-  // persist
+  // persist chats
   useEffect(() => {
     if (convId) set(convId, messages);
   }, [messages]);

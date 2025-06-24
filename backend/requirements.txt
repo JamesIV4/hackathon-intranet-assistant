@@ -5,3 +5,7 @@ langchain==0.2.1
 langchain-community==0.2.1
 faiss-cpu==1.8.*
 python-dotenv
+sentence-transformers
+tqdm
+html2text
+atlassian-python-api

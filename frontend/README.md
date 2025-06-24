@@ -2,11 +2,25 @@
 
 ## Backend
 
-At the root level, run:
+At the root level:
 
-```bash
-uvicorn backend.main:app --reload --port 8000
-```
+1. Activate the virtual environment:
+
+   ```bash
+   source .venv/bin/activate
+   ```
+
+2. Ingest the wiki:
+
+   ```bash
+   python backend/ingest.py
+   ```
+
+3. Run:
+
+   ```bash
+   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
 ## Frontend
 
