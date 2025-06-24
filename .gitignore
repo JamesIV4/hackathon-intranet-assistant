@@ -10,3 +10,5 @@ __pycache__
 secure.env
 data/
 data/*
+data/*.md
+data/*.meta
