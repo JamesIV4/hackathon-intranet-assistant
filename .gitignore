@@ -6,3 +6,4 @@ models/
 .next/
 .venv/
 .npmrc
+__pycache__
