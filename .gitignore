@@ -8,3 +8,4 @@ models/
 .npmrc
 __pycache__
 secure.env
+data/

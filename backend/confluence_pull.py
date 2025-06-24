@@ -74,63 +74,71 @@ h2m.body_width = 0  # preserve wrapping
 ###############################################################################
 
 def export_space(space_key: str) -> int:
-    """Export a single space by `space_key` using Confluence **v2** API.
+    """Export pages from a Confluence space using v2 API.
 
-    v2 requires the **numeric** space ID for nested endpoints, so we:
-      1. Resolve `space_key` → `space_id` via /spaces?keys=…
-      2. Page through `/spaces/{id}/pages` (200 per page max).
-      3. For every page, pull full storage body → Markdown.
+    * Resolves `space_key` → numeric `space_id` first.
+    * Streams through `/spaces/{id}/pages` and follows `_links.next`.
+    * Saves each page as Markdown plus a small .meta file.
     """
-    # Step 1 – resolve key → id
-    r = session.get(f"{BASE_URL}/wiki/api/v2/spaces", params={"keys": space_key}, timeout=30)
-    if r.status_code == 404 or not r.json().get("results"):
-        log.error("Space key '%s' not found or you lack permission", space_key)
+    # ──────────────────────────────────────────────────────────────────────────
+    # 1️⃣  Resolve key → id
+    resp = session.get(
+        f"{BASE_URL}/wiki/api/v2/spaces",
+        params={"keys": space_key},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    results = resp.json().get("results", [])
+    if not results:
+        log.error("Space key '%s' not found or insufficient permissions", space_key)
         return 0
-    space_id = r.json()["results"][0]["id"]
+    space_id = results[0]["id"]
     log.info("Resolved space '%s' → id %s", space_key, space_id)
 
-    # Step 2 – page through content
-    page_url = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
-    params   = {"limit": 200}
-    count    = 0
+    # ──────────────────────────────────────────────────────────────────────────
+    # 2️⃣  Iterate pages (200 per request, follow _links.next)
+    page_url: str = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
+    params: dict = {"limit": 200}
+    total: int = 0
 
     while True:
         log.info("GET %s", page_url)
-        resp = session.get(page_url, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        r = session.get(page_url, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
 
         for item in data.get("results", []):
             page_id = item["id"]
-            title   = item.get("title", f"page-{page_id}")
+            title = item.get("title", f"page-{page_id}")
 
-            # get body.storage & version in one call (expand)
+            # Pull full storage body once
             full = conf.get_page_by_id(page_id, expand="body.storage,version")
             storage = (full.get("body") or {}).get("storage") or {} # type: ignore
             html = storage.get("value", "")
             if not html:
                 continue
 
-            md   = h2m.handle(html)
+            md = h2m.handle(html)
             fname = OUT_DIR / f"{slugify(title)}.md"
             fname.write_text(md, encoding="utf-8")
 
-            meta  = OUT_DIR / f"{fname.stem}.meta"
-            ver   = full.get("version", {}).get("number", "unknown") # type: ignore
-            meta.write_text(
+            ver = full.get("version", {}).get("number", "unknown") # type: ignore
+            (OUT_DIR / f"{fname.stem}.meta").write_text(
                 f"id: {page_id}\\n"
                 f"space: {space_key}\\n"
                 f"version: {ver}\\n"
             )
-            count += 1
+            total += 1
 
-        next_cursor = data.get("cursor")
-        if not next_cursor:
+        # Pagination via _links.next
+        next_rel = (data.get("_links") or {}).get("next")
+        if not next_rel:
             break
-        params = {"cursor": next_cursor, "limit": 200}
+        page_url = f"{BASE_URL.rstrip('/')}{next_rel}"
+        params = {}  # next URL already encodes cursor & limit
 
-    log.info("Space '%s' – wrote %s pages", space_key, count)
-    return count
+    log.info("Space '%s' – wrote %s pages", space_key, total)
+    return total
 
 
 t0 = time.perf_counter()
