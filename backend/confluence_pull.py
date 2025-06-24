@@ -139,20 +139,20 @@ def export_space(space_key: str) -> int:
             # Build safe filename (truncate to 180 chars)
             slug = slugify(title)[:180]
             fname = OUT_DIR / f"{slug}.md"
-            meta_path = OUT_DIR / f"{slug}.meta"
+            # meta_path = OUT_DIR / f"{slug}.meta"
 
             # Skip if we already have this version
-            if meta_path.exists():
-                existing_ver = next(
-                    (
-                        line.split(":", 1)[1].strip()
-                        for line in meta_path.read_text().splitlines()
-                        if line.startswith("version:")
-                    ),
-                    None,
-                )
-                if existing_ver == str(ver):
-                    continue  # unchanged
+            # if meta_path.exists():
+            #     existing_ver = next(
+            #         (
+            #             line.split(":", 1)[1].strip()
+            #             for line in meta_path.read_text().splitlines()
+            #             if line.startswith("version:")
+            #         ),
+            #         None,
+            #     )
+            #     if existing_ver == str(ver):
+            #         continue  # unchanged
 
             # Write content & meta
             md = h2m.handle(html)
