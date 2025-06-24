@@ -25,6 +25,7 @@ from requests.adapters import HTTPAdapter, Retry
 # Configuration — edit ENV vars rather than this file when possible
 ###############################################################################
 load_dotenv()
+load_dotenv("secure.env", override=True)  # overlay secrets
 BASE_URL = os.getenv("CONFLUENCE_BASE_URL", "https://genesys-confluence.atlassian.net")
 EMAIL    = os.getenv("ATLASSIAN_EMAIL")
 TOKEN    = os.getenv("ATLASSIAN_TOKEN")
