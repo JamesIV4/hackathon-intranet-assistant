@@ -28,7 +28,7 @@ load_dotenv()
 BASE_URL = os.getenv("CONFLUENCE_BASE_URL", "https://genesys-confluence.atlassian.net")
 EMAIL    = os.getenv("ATLASSIAN_EMAIL")
 TOKEN    = os.getenv("ATLASSIAN_TOKEN")
-SPACES   = ["PureCloud"]
+SPACES   = os.getenv("CONFLUENCE_SPACES", "PureCloud").split(",")  # comma‑list
 OUT_DIR  = Path(__file__).resolve().parent.parent / "data"
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -76,12 +76,14 @@ h2m.body_width = 0  # preserve wrapping
 def export_space(space_key: str) -> int:
     """Export pages from a Confluence space using v2 API.
 
-    * Resolves `space_key` → numeric `space_id` first.
-    * Streams through `/spaces/{id}/pages` and follows `_links.next`.
-    * Saves each page as Markdown plus a small .meta file.
+    * Resolves `space_key` → `space_id`.
+    * Paginates through `/spaces/{id}/pages` via `_links.next`.
+    * Converts XHTML → Markdown.
+    * Writes `.md` and richer `.meta` (id, version, updated, author, path, url, labels).
+    * Skips writing when the same version has already been pulled.
+    * Truncates overly long filenames to keep under typical filesystem limits.
     """
-    # ──────────────────────────────────────────────────────────────────────────
-    # 1️⃣  Resolve key → id
+    # 1️⃣ Resolve key → id
     resp = session.get(
         f"{BASE_URL}/wiki/api/v2/spaces",
         params={"keys": space_key},
@@ -95,11 +97,10 @@ def export_space(space_key: str) -> int:
     space_id = results[0]["id"]
     log.info("Resolved space '%s' → id %s", space_key, space_id)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 2️⃣  Iterate pages (200 per request, follow _links.next)
-    page_url: str = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
+    # 2️⃣ Iterate pages (follow _links.next)
+    page_url = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
     params: dict = {"limit": 200}
-    total: int = 0
+    total = 0
 
     while True:
         log.info("GET %s", page_url)
@@ -111,31 +112,67 @@ def export_space(space_key: str) -> int:
             page_id = item["id"]
             title = item.get("title", f"page-{page_id}")
 
-            # Pull full storage body once
-            full = conf.get_page_by_id(page_id, expand="body.storage,version")
+            full = conf.get_page_by_id(
+                page_id,
+                expand="body.storage,version,ancestors,metadata.labels,history",
+            )
             storage = (full.get("body") or {}).get("storage") or {} # type: ignore
             html = storage.get("value", "")
             if not html:
                 continue
 
-            md = h2m.handle(html)
-            fname = OUT_DIR / f"{slugify(title)}.md"
-            fname.write_text(md, encoding="utf-8")
-
+            # Metadata helpers
             ver = full.get("version", {}).get("number", "unknown") # type: ignore
+            updated = full.get("version", {}).get("when", "") # type: ignore
+            author = (full.get("version", {}).get("by") or {}).get( # type: ignore
+                "displayName", ""
+            )
+            anc_titles = [a.get("title", "") for a in full.get("ancestors", [])] # type: ignore
+            path = " / ".join(anc_titles + [title])
+            labels = ",".join(
+                l.get("name", "")
+                for l in (full.get("metadata", {}).get("labels", {}).get("results", [])) # type: ignore
+            )
+            url = f"{BASE_URL.rstrip('/')}{full.get('_links', {}).get('webui', '')}" # type: ignore
+
+            # Build safe filename (truncate to 180 chars)
+            slug = slugify(title)[:180]
+            fname = OUT_DIR / f"{slug}.md"
+            meta_path = OUT_DIR / f"{slug}.meta"
+
+            # Skip if we already have this version
+            if meta_path.exists():
+                existing_ver = next(
+                    (
+                        line.split(":", 1)[1].strip()
+                        for line in meta_path.read_text().splitlines()
+                        if line.startswith("version:")
+                    ),
+                    None,
+                )
+                if existing_ver == str(ver):
+                    continue  # unchanged
+
+            # Write content & meta
+            md = h2m.handle(html)
+            fname.write_text(md, encoding="utf-8")
             (OUT_DIR / f"{fname.stem}.meta").write_text(
-                f"id: {page_id}\\n"
-                f"space: {space_key}\\n"
-                f"version: {ver}\\n"
+                f"id: {page_id}\n"
+                f"space: {space_key}\n"
+                f"version: {ver}\n"
+                f"updated: {updated}\n"
+                f"author: {author}\n"
+                f"path: {path}\n"
+                f"url: {url}\n"
+                f"labels: {labels}\n"
             )
             total += 1
 
-        # Pagination via _links.next
         next_rel = (data.get("_links") or {}).get("next")
         if not next_rel:
             break
         page_url = f"{BASE_URL.rstrip('/')}{next_rel}"
-        params = {}  # next URL already encodes cursor & limit
+        params = {}
 
     log.info("Space '%s' – wrote %s pages", space_key, total)
     return total
