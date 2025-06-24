@@ -10,13 +10,19 @@ At the root level:
    source .venv/bin/activate
    ```
 
-2. Ingest the wiki:
+2. Pull the data from Confluence
+
+   ```bash
+   python backend/confluence_pull.py
+   ```
+
+3. Ingest the wiki:
 
    ```bash
    python backend/ingest.py
    ```
 
-3. Run:
+4. Run:
 
    ```bash
    uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000

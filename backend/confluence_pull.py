@@ -75,14 +75,13 @@ h2m.body_width = 0  # preserve wrapping
 ###############################################################################
 
 def export_space(space_key: str) -> int:
-    """Export pages from a Confluence space using v2 API.
+    """Fast export of a Confluence space using the v2 API.
 
-    * Resolves `space_key` → `space_id`.
-    * Paginates through `/spaces/{id}/pages` via `_links.next`.
-    * Converts XHTML → Markdown.
-    * Writes `.md` and richer `.meta` (id, version, updated, author, path, url, labels).
-    * Skips writing when the same version has already been pulled.
-    * Truncates overly long filenames to keep under typical filesystem limits.
+    Changes vs. previous version
+    ───────────────────────────
+    • **Parallel page‑body fetch** with ThreadPoolExecutor (8 workers)
+    • **Removed duplicate‑version check** to avoid extra disk I/O
+    • Keeps filename truncation + rich .meta output
     """
     # 1️⃣ Resolve key → id
     resp = session.get(
@@ -99,9 +98,17 @@ def export_space(space_key: str) -> int:
     log.info("Resolved space '%s' → id %s", space_key, space_id)
 
     # 2️⃣ Iterate pages (follow _links.next)
-    page_url = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    page_url: str = f"{BASE_URL}/wiki/api/v2/spaces/{space_id}/pages"
     params: dict = {"limit": 200}
-    total = 0
+    total: int = 0
+
+    def fetch_full(pid: str):
+        return conf.get_page_by_id(
+            pid,
+            expand="body.storage,version,ancestors,metadata.labels,history",
+        )
 
     while True:
         log.info("GET %s", page_url)
@@ -109,65 +116,50 @@ def export_space(space_key: str) -> int:
         r.raise_for_status()
         data = r.json()
 
-        for item in data.get("results", []):
-            page_id = item["id"]
-            title = item.get("title", f"page-{page_id}")
+        page_map = {item["id"]: item.get("title", f"page-{item['id']}") for item in data.get("results", [])}
+        if not page_map:
+            break
 
-            full = conf.get_page_by_id(
-                page_id,
-                expand="body.storage,version,ancestors,metadata.labels,history",
-            )
-            storage = (full.get("body") or {}).get("storage") or {} # type: ignore
-            html = storage.get("value", "")
-            if not html:
-                continue
+        # 8‑way parallel fetch of bodies
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(fetch_full, pid): pid for pid in page_map}
+            for fut in as_completed(futures):
+                full = fut.result()
+                page_id = futures[fut]
+                title = page_map[page_id]
 
-            # Metadata helpers
-            ver = full.get("version", {}).get("number", "unknown") # type: ignore
-            updated = full.get("version", {}).get("when", "") # type: ignore
-            author = (full.get("version", {}).get("by") or {}).get( # type: ignore
-                "displayName", ""
-            )
-            anc_titles = [a.get("title", "") for a in full.get("ancestors", [])] # type: ignore
-            path = " / ".join(anc_titles + [title])
-            labels = ",".join(
-                l.get("name", "")
-                for l in (full.get("metadata", {}).get("labels", {}).get("results", [])) # type: ignore
-            )
-            url = f"{BASE_URL.rstrip('/')}{full.get('_links', {}).get('webui', '')}" # type: ignore
+                storage = (full.get("body") or {}).get("storage") or {} # type: ignore
+                html = storage.get("value", "")
+                if not html:
+                    continue
 
-            # Build safe filename (truncate to 180 chars)
-            slug = slugify(title)[:180]
-            fname = OUT_DIR / f"{slug}.md"
-            # meta_path = OUT_DIR / f"{slug}.meta"
+                # Metadata
+                ver = full.get("version", {}).get("number", "unknown") # type: ignore
+                updated = full.get("version", {}).get("when", "") # type: ignore
+                author = (full.get("version", {}).get("by") or {}).get("displayName", "") # type: ignore
+                anc_titles = [a.get("title", "") for a in full.get("ancestors", [])] # type: ignore
+                path = " / ".join(anc_titles + [title])
+                labels = ",".join(l.get("name", "") for l in (full.get("metadata", {}).get("labels", {}).get("results", []))) # type: ignore
+                url = f"{BASE_URL.rstrip('/')}{full.get('_links', {}).get('webui', '')}" # type: ignore
 
-            # Skip if we already have this version
-            # if meta_path.exists():
-            #     existing_ver = next(
-            #         (
-            #             line.split(":", 1)[1].strip()
-            #             for line in meta_path.read_text().splitlines()
-            #             if line.startswith("version:")
-            #         ),
-            #         None,
-            #     )
-            #     if existing_ver == str(ver):
-            #         continue  # unchanged
+                slug = slugify(title)[:180]
+                fname = OUT_DIR / f"{slug}.md"
+                meta_path = OUT_DIR / f"{slug}.meta"
 
-            # Write content & meta
-            md = h2m.handle(html)
-            fname.write_text(md, encoding="utf-8")
-            (OUT_DIR / f"{fname.stem}.meta").write_text(
-                f"id: {page_id}\n"
-                f"space: {space_key}\n"
-                f"version: {ver}\n"
-                f"updated: {updated}\n"
-                f"author: {author}\n"
-                f"path: {path}\n"
-                f"url: {url}\n"
-                f"labels: {labels}\n"
-            )
-            total += 1
+                # Write files (overwrite is okay – faster than reading first)
+                md = h2m.handle(html)
+                fname.write_text(md, encoding="utf-8")
+                meta_path.write_text(
+                    f"id: {page_id}\n"
+                    f"space: {space_key}\n"
+                    f"version: {ver}\n"
+                    f"updated: {updated}\n"
+                    f"author: {author}\n"
+                    f"path: {path}\n"
+                    f"url: {url}\n"
+                    f"labels: {labels}\n"
+                )
+                total += 1
 
         next_rel = (data.get("_links") or {}).get("next")
         if not next_rel:
