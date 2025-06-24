@@ -120,10 +120,10 @@ def export_space(space_key: str) -> int:
         if not page_map:
             break
 
-        # 8‑way parallel fetch of bodies
+        # 8‑way parallel fetch of bodies with inline progress bar
         with ThreadPoolExecutor(max_workers=8) as pool:
             futures = {pool.submit(fetch_full, pid): pid for pid in page_map}
-            for fut in as_completed(futures):
+            for fut in tqdm.tqdm(as_completed(futures), total=len(futures), desc=f"[{space_key}]", unit="page"):
                 full = fut.result()
                 page_id = futures[fut]
                 title = page_map[page_id]
