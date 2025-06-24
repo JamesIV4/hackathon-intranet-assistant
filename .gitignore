@@ -4,3 +4,5 @@ node_modules/
 models/
 # Vite/Next build outputs
 .next/
+.venv/
+.npmrc

@@ -1,0 +1,7 @@
+fastapi==0.110.*
+uvicorn[standard]==0.29.*
+llama-cpp-python==0.2.72   # CPU/q4_K_M quant fits 8 GB
+langchain==0.2.1
+langchain-community==0.2.1
+faiss-cpu==1.8.*
+python-dotenv
