@@ -73,7 +73,7 @@ export default function ChatWindow({ convId }: { convId: string | null }) {
   }, [messages]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full w-full">
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.map((m, i) => (
           <motion.div
