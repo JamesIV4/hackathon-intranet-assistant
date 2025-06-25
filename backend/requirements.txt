@@ -9,3 +9,5 @@ sentence-transformers
 tqdm
 html2text
 atlassian-python-api
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
