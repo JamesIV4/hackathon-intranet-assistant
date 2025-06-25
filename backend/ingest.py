@@ -1,8 +1,6 @@
 from pathlib import Path
 import os, re
 from dotenv import load_dotenv
-import time, logging
-import tqdm
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -10,9 +8,6 @@ from langchain_community.vectorstores import FAISS
 
 load_dotenv()
 load_dotenv("secure.env", override=True)  # overlay secrets
-
-logging.basicConfig(level=logging.INFO, format="[INGEST] %(message)s")
-t0 = time.perf_counter()
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH  = Path(__file__).parent / "faiss_index"
@@ -46,7 +41,7 @@ def load_with_meta(md_path: Path):
 # ──────────────────────────────────────────────────────────────────────────────
 
 documents = []
-for md in tqdm.tqdm(list(DATA_DIR.rglob("*.md")), desc="[INGEST] Reading MD", unit="file"):
+for md in DATA_DIR.rglob("*.md"):
     if md.name.startswith("."):
         continue  # skip hidden files
     documents.extend(load_with_meta(md))
@@ -61,7 +56,6 @@ if not documents:
 splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=120)
 chunks = splitter.split_documents(documents)
 
-logging.info("Loaded %s documents, produced %s chunks", len(documents), len(chunks))
 faiss_db = FAISS.from_documents(chunks, emb)
 faiss_db.save_local(str(DB_PATH))
-logging.info("✅ Ingestion complete → %s (%.1fs)", DB_PATH, time.perf_counter() - t0)
+print("✅ Ingestion complete →", DB_PATH)
